@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<base target="_top">
+<meta charset="UTF-8" />
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root { --line-green: #06C755; --red: #d9534f; --amber: #e0a326; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif;
+    background: #fafafa;
+    color: #262626;
+  }
+  .header {
+    padding: 14px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    background: #fff;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .container { padding: 24px 20px; }
+  .scan-btn {
+    width: 100%;
+    padding: 16px 0;
+    border-radius: 12px;
+    border: none;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    background: var(--line-green);
+  }
+  .scan-btn:disabled { opacity: 0.4; }
+  .result-card { margin-top: 20px; border-radius: 12px; padding: 20px; text-align: center; }
+  .result-card.ok { background: #eafaf0; border: 1px solid var(--line-green); }
+  .result-card.duplicate { background: #fef7e6; border: 1px solid var(--amber); }
+  .result-card.error { background: #fdecec; border: 1px solid var(--red); }
+  .result-card .status-label { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .result-card .status-label.ok { color: var(--line-green); }
+  .result-card .status-label.duplicate { color: var(--amber); }
+  .result-card .status-label.error { color: var(--red); }
+  .result-card .salon { font-size: 16px; font-weight: 700; }
+  .result-card .detail { font-size: 12px; color: #7a7a7a; margin-top: 4px; }
+  .history { margin-top: 28px; }
+  .history-title { font-size: 11px; color: #9a9a9a; margin-bottom: 8px; }
+  .history-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px; }
+  .history-item .name { color: #262626; }
+  .history-item .time { color: #b0b0b0; }
+</style>
+</head>
+<body>
+
+<div class="header">受付チェックイン</div>
+<div class="container">
+  <button class="scan-btn" id="scanBtn">QRコードをスキャン</button>
+  <div id="result"></div>
+  <div class="history" id="history" style="display:none;">
+    <div class="history-title">直近のチェックイン</div>
+    <div id="historyList"></div>
+  </div>
+</div>
+
+<script>
+// GAS側のdoGetが埋め込む値(コード編集不要):
+// スクリプトプロパティ「LIFF_ID_CHECKIN」の値と、このApps ScriptのデプロイURL
+const LIFF_ID = "2010919674-WsksPFqO";
+const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwwMJgIRQA-3dK7XImX3JiPbiGcv44hZTH1C0dhR1qfxXdHrFCM8zyLMXbOMMxT9UAlIA/exec";
+
+const checkinHistory = [];
+
+async function init() {
+  try {
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return;
+    }
+    document.getElementById("scanBtn").addEventListener("click", startScan);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function startScan() {
+  if (!liff.scanCodeV2) {
+    renderResult("error", "この端末ではQRスキャン機能が利用できません。");
+    return;
+  }
+  try {
+    const result = await liff.scanCodeV2();
+    if (!result || !result.value) return;
+    await submitCheckin(result.value.trim());
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function submitCheckin(ticketId) {
+  const scanBtn = document.getElementById("scanBtn");
+  scanBtn.disabled = true;
+  scanBtn.textContent = "確認中…";
+
+  try {
+    const res = await fetch(GAS_WEBAPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ type: "checkin", ticketId: ticketId })
+    });
+    const data = await res.json();
+
+    if (data.status === "ok") {
+      renderResult("ok", `${data.salonName} 様`, `来場 ${data.count}名 / チェックイン完了`);
+      checkinHistory.unshift({ salon: data.salonName, time: nowLabel() });
+      renderHistory();
+    } else if (data.status === "duplicate") {
+      renderResult("duplicate", `${data.salonName} 様`, "すでにチェックイン済みです");
+    } else if (data.status === "cancelled") {
+      renderResult("error", "キャンセル済みの申込です", "");
+    } else if (data.status === "not_found") {
+      renderResult("error", "該当するチケットが見つかりません", "QRコードをご確認ください");
+    } else {
+      renderResult("error", "処理に失敗しました", "もう一度お試しください");
+    }
+  } catch (err) {
+    renderResult("error", "通信エラーが発生しました", "");
+    console.error(err);
+  } finally {
+    scanBtn.disabled = false;
+    scanBtn.textContent = "QRコードをスキャン";
+  }
+}
+
+function renderResult(type, title, detail) {
+  const labelMap = { ok: "チェックインOK", duplicate: "チェックイン済み", error: "エラー" };
+  document.getElementById("result").innerHTML = `
+    <div class="result-card ${type}">
+      <div class="status-label ${type}">${labelMap[type]}</div>
+      <div class="salon">${escapeHtml(title)}</div>
+      ${detail ? `<div class="detail">${escapeHtml(detail)}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderHistory() {
+  const historyEl = document.getElementById("history");
+  const listEl = document.getElementById("historyList");
+  historyEl.style.display = "block";
+  listEl.innerHTML = checkinHistory.slice(0, 10).map(item => `
+    <div class="history-item">
+      <span class="name">${escapeHtml(item.salon)} 様</span>
+      <span class="time">${item.time}</span>
+    </div>
+  `).join("");
+}
+
+function nowLabel() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+init();
+</script>
+</body>
+</html>
