@@ -176,17 +176,14 @@ async function submitApply() {
   submitBtn.textContent = "送信中…";
 
   try {
-    const res = await fetch(GAS_WEBAPP_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" }, // GAS Web AppのCORS制約回避のためtext/plainで送る
-      body: JSON.stringify({
-        type: "apply",
-        userId: profile.userId,
-        displayName: profile.displayName,
-        salonName: salonName,
-        count: selectedCount
-      })
+    const params = new URLSearchParams({
+      action: "apply",
+      userId: profile.userId,
+      displayName: profile.displayName,
+      salonName: salonName,
+      count: selectedCount
     });
+    const res = await fetch(GAS_WEBAPP_URL + "?" + params.toString());
     const data = await res.json();
 
     if (data.status === "ok") {
