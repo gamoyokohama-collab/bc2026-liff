@@ -103,11 +103,8 @@ async function submitCheckin(ticketId) {
   scanBtn.textContent = "確認中…";
 
   try {
-    const res = await fetch(GAS_WEBAPP_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ type: "checkin", ticketId: ticketId })
-    });
+    const params = new URLSearchParams({ action: "checkin", ticketId: ticketId });
+    const res = await fetch(GAS_WEBAPP_URL + "?" + params.toString());
     const data = await res.json();
 
     if (data.status === "ok") {
