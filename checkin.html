@@ -3,6 +3,7 @@
 <head>
 <base target="_top">
 <meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
   :root { --line-green: #06C755; --red: #d9534f; --amber: #e0a326; }
@@ -17,7 +18,7 @@
     padding: 14px 16px;
     border-bottom: 1px solid #f0f0f0;
     background: #fff;
-    font-size: 14px;
+    font-size: 17px;
     font-weight: 600;
   }
   .container { padding: 24px 20px; }
@@ -27,7 +28,7 @@
     border-radius: 12px;
     border: none;
     color: #fff;
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 600;
     background: var(--line-green);
   }
@@ -36,15 +37,15 @@
   .result-card.ok { background: #eafaf0; border: 1px solid var(--line-green); }
   .result-card.duplicate { background: #fef7e6; border: 1px solid var(--amber); }
   .result-card.error { background: #fdecec; border: 1px solid var(--red); }
-  .result-card .status-label { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .result-card .status-label { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
   .result-card .status-label.ok { color: var(--line-green); }
   .result-card .status-label.duplicate { color: var(--amber); }
   .result-card .status-label.error { color: var(--red); }
-  .result-card .salon { font-size: 16px; font-weight: 700; }
-  .result-card .detail { font-size: 12px; color: #7a7a7a; margin-top: 4px; }
+  .result-card .salon { font-size: 20px; font-weight: 700; }
+  .result-card .detail { font-size: 15px; color: #7a7a7a; margin-top: 6px; }
   .history { margin-top: 28px; }
-  .history-title { font-size: 11px; color: #9a9a9a; margin-bottom: 8px; }
-  .history-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px; }
+  .history-title { font-size: 13px; color: #9a9a9a; margin-bottom: 8px; }
+  .history-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
   .history-item .name { color: #262626; }
   .history-item .time { color: #b0b0b0; }
 </style>
