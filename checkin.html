@@ -97,36 +97,62 @@ async function startScan() {
   }
 }
 
+// GASへ1回リクエストを送る(通信エラー時はnullを返す。ステータス自体のエラーは返り値に含める)
+async function requestCheckin(ticketId) {
+  const params = new URLSearchParams({ action: "checkin", ticketId: ticketId });
+  const res = await fetch(GAS_WEBAPP_URL + "?" + params.toString());
+  return await res.json();
+}
+
 async function submitCheckin(ticketId) {
   const scanBtn = document.getElementById("scanBtn");
   scanBtn.disabled = true;
-  scanBtn.textContent = "確認中…";
+  scanBtn.textContent = "確認中…(コールドスタート時は数秒かかることがあります)";
 
-  try {
-    const params = new URLSearchParams({ action: "checkin", ticketId: ticketId });
-    const res = await fetch(GAS_WEBAPP_URL + "?" + params.toString());
-    const data = await res.json();
+  let data = null;
+  let lastErr = null;
 
-    if (data.status === "ok") {
-      renderResult("ok", `${data.salonName} 様`, `来場 ${data.count}名 / チェックイン完了`);
-      checkinHistory.unshift({ salon: data.salonName, time: nowLabel() });
-      renderHistory();
-    } else if (data.status === "duplicate") {
-      renderResult("duplicate", `${data.salonName} 様`, "すでにチェックイン済みです");
-    } else if (data.status === "cancelled") {
-      renderResult("error", "キャンセル済みの申込です", "");
-    } else if (data.status === "not_found") {
-      renderResult("error", "該当するチケットが見つかりません", "QRコードをご確認ください");
-    } else {
-      renderResult("error", "処理に失敗しました", "もう一度お試しください");
+  // GASのコールドスタート・ロック待ちで応答が遅れることがあるため、
+  // 通信エラー時は1回だけ自動リトライしてから最終判断する
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      data = await requestCheckin(ticketId);
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      console.error(`checkin attempt ${attempt + 1} failed`, err);
+      if (attempt === 0) {
+        scanBtn.textContent = "再確認中…";
+        await new Promise((r) => setTimeout(r, 1500));
+      }
     }
-  } catch (err) {
-    renderResult("error", "通信エラーが発生しました", "");
-    console.error(err);
-  } finally {
+  }
+
+  if (lastErr) {
+    renderResult("error", "通信エラーが発生しました",
+      "処理自体は完了している場合があります。受付名簿(スプレッドシート)をご確認いただくか、少し時間を置いて同じQRを再度スキャンしてください。");
     scanBtn.disabled = false;
     scanBtn.textContent = "QRコードをスキャン";
+    return;
   }
+
+  if (data.status === "ok") {
+    renderResult("ok", `${data.salonName} 様`, `来場 ${data.count}名 / チェックイン完了`);
+    checkinHistory.unshift({ salon: data.salonName, time: nowLabel() });
+    renderHistory();
+  } else if (data.status === "duplicate") {
+    renderResult("duplicate", `${data.salonName} 様`, "すでにチェックイン済みです");
+  } else if (data.status === "cancelled") {
+    renderResult("error", "キャンセル済みの申込です", "");
+  } else if (data.status === "not_found") {
+    renderResult("error", "該当するチケットが見つかりません", "QRコードをご確認ください");
+  } else {
+    renderResult("error", "処理に失敗しました", "もう一度お試しください");
+  }
+
+  scanBtn.disabled = false;
+  scanBtn.textContent = "QRコードをスキャン";
 }
 
 function renderResult(type, title, detail) {
