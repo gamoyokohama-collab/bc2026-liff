@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>神奈川ビューティコレクション2026 来場お申し込み</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root {
+    --line-green: #06C755;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+    background: #ffffff;
+    color: #262626;
+  }
+  .header {
+    padding: 20px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .header .event {
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 4px;
+  }
+  .header .venue {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+  .content {
+    padding: 20px;
+    padding-bottom: 100px;
+  }
+  .field {
+    margin-bottom: 20px;
+  }
+  .field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #767676;
+    letter-spacing: 0.02em;
+    margin-bottom: 6px;
+  }
+  .field .readonly {
+    border-radius: 8px;
+    background: #fafafa;
+    border: 1px solid #e5e5e5;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #767676;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .field input[type="text"], .field select {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid #d4d4d4;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    background: #fff;
+  }
+  .field input[type="text"]:focus, .field select:focus {
+    border-color: var(--line-green);
+    box-shadow: 0 0 0 1px var(--line-green);
+  }
+  .count-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .count-btn {
+    padding: 10px 0;
+    border-radius: 8px;
+    border: 1px solid #d4d4d4;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    color: #767676;
+    cursor: pointer;
+  }
+  .count-btn.active {
+    background: var(--line-green);
+    border-color: var(--line-green);
+    color: #fff;
+  }
+  .footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 14px 20px 20px;
+    background: #fff;
+    border-top: 1px solid #f0f0f0;
+  }
+  .submit-btn {
+    width: 100%;
+    padding: 14px 0;
+    border-radius: 12px;
+    border: none;
+    background: var(--line-green);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .submit-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+  .status-screen {
+    display: none;
+    padding: 60px 24px;
+    text-align: center;
+  }
+  .status-screen.show { display: block; }
+  .status-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+    font-size: 28px;
+    color: #fff;
+  }
+  .status-icon.ok { background: var(--line-green); }
+  .status-icon.error { background: #e0505a; }
+  .status-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .status-message {
+    font-size: 13px;
+    color: #767676;
+    line-height: 1.6;
+  }
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 3px solid #eee;
+    border-top-color: var(--line-green);
+    margin: 0 auto 16px;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-screen {
+    padding: 80px 24px;
+    text-align: center;
+  }
+  .loading-text {
+    font-size: 13px;
+    color: #767676;
+  }
+  #formScreen { display: none; }
+</style>
+</head>
+<body>
+
+<div id="loadingScreen" class="loading-screen">
+  <div class="spinner"></div>
+  <div class="loading-text">LINEのプロフィール情報を確認しています…</div>
+</div>
+
+<div id="formScreen">
+  <div class="header">
+    <div class="event">神奈川ビューティコレクション2026</div>
+    <div class="venue">10月6日(火) 横浜産貿ホール マリネリア</div>
+  </div>
+
+  <div class="content">
+    <div class="field">
+      <label>お名前(LINEより取得)</label>
+      <div class="readonly" id="displayNameBox">—</div>
+    </div>
+
+    <div class="field">
+      <label>サロン名 *</label>
+      <input type="text" id="salonName" placeholder="例)ヘアサロン ガモウ 横浜店">
+    </div>
+
+    <div class="field">
+      <label>担当営業</label>
+      <select id="salesRep">
+        <option value="">読み込み中…</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>来場予定人数 *</label>
+      <div class="count-grid" id="countGrid">
+        <button type="button" class="count-btn" data-count="1">1名</button>
+        <button type="button" class="count-btn" data-count="2">2名</button>
+        <button type="button" class="count-btn" data-count="3">3名</button>
+        <button type="button" class="count-btn" data-count="4+">4+名</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button type="button" class="submit-btn" id="submitBtn" disabled>この内容で申し込む</button>
+  </div>
+</div>
+
+<div id="statusScreen" class="status-screen"></div>
+
+<script>
+  // ===== 設定 =====
+  const LIFF_ID = "2010919674-PQFaj0oQ";
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbwwMJgIRQA-3dK7XImX3JiPbiGcv44hZTH1C0dhR1qfxXdHrFCM8zyLMXbOMMxT9UAlIA/exec";
+
+  let profile = null;
+  let salesReps = [];
+  let selectedCount = null;
+  let selectedRepIndex = "";
+
+  const loadingScreen = document.getElementById("loadingScreen");
+  const formScreen = document.getElementById("formScreen");
+  const statusScreen = document.getElementById("statusScreen");
+  const displayNameBox = document.getElementById("displayNameBox");
+  const salonNameInput = document.getElementById("salonName");
+  const salesRepSelect = document.getElementById("salesRep");
+  const countGrid = document.getElementById("countGrid");
+  const submitBtn = document.getElementById("submitBtn");
+
+  function showStatus(type, title, message) {
+    loadingScreen.style.display = "none";
+    formScreen.style.display = "none";
+    statusScreen.className = "status-screen show";
+    statusScreen.innerHTML = `
+      <div class="status-icon ${type}">${type === "ok" ? "✓" : "!"}</div>
+      <div class="status-title">${title}</div>
+      <div class="status-message">${message}</div>
+    `;
+  }
+
+  function updateSubmitState() {
+    submitBtn.disabled = !(salonNameInput.value.trim() && selectedCount);
+  }
+
+  countGrid.addEventListener("click", (e) => {
+    const btn = e.target.closest(".count-btn");
+    if (!btn) return;
+    [...countGrid.children].forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    selectedCount = btn.dataset.count;
+    updateSubmitState();
+  });
+
+  salonNameInput.addEventListener("input", updateSubmitState);
+
+  salesRepSelect.addEventListener("change", (e) => {
+    selectedRepIndex = e.target.value;
+  });
+
+  async function loadSalesReps() {
+    try {
+      const res = await fetch(`${GAS_URL}?action=getSalesReps`);
+      const data = await res.json();
+      if (data.status === "ok" && Array.isArray(data.reps)) {
+        salesReps = data.reps;
+      }
+    } catch (err) {
+      // 取得できない場合は空リストのまま(未選択で申し込み続行可)
+    }
+    salesRepSelect.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "選択してください";
+    salesRepSelect.appendChild(placeholder);
+    salesReps.forEach((rep, i) => {
+      const opt = document.createElement("option");
+      opt.value = i;
+      opt.textContent = rep.name;
+      salesRepSelect.appendChild(opt);
+    });
+  }
+
+  async function submitApply() {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "送信中…";
+
+    const rep = salesReps[selectedRepIndex] || { code: "", name: "" };
+    const params = new URLSearchParams({
+      action: "apply",
+      userId: profile.userId,
+      displayName: profile.displayName,
+      salonName: salonNameInput.value.trim(),
+      count: selectedCount,
+      repCode: rep.code || "",
+      repName: rep.name || ""
+    });
+
+    try {
+      const res = await fetch(`${GAS_URL}?${params.toString()}`);
+      const data = await res.json();
+
+      if (data.status === "ok") {
+        showStatus("ok", "お申し込みありがとうございます",
+          "LINEのトーク画面にQRチケットをお送りしました。当日は受付でご提示ください。");
+      } else if (data.status === "duplicate") {
+        showStatus("error", "すでにお申し込み済みです", data.message || "");
+      } else if (data.status === "full") {
+        showStatus("error", "満員のため受付を終了しました", data.message || "");
+      } else {
+        showStatus("error", "送信できませんでした", data.message || "時間を置いて再度お試しください。");
+      }
+    } catch (err) {
+      showStatus("error", "通信エラーが発生しました", "電波の良い場所で再度お試しください。");
+    }
+  }
+
+  submitBtn.addEventListener("click", submitApply);
+
+  async function init() {
+    try {
+      await liff.init({ liffId: LIFF_ID });
+
+      if (!liff.isLoggedIn()) {
+        liff.login();
+        return;
+      }
+
+      profile = await liff.getProfile();
+      displayNameBox.textContent = profile.displayName;
+
+      await loadSalesReps();
+
+      loadingScreen.style.display = "none";
+      formScreen.style.display = "block";
+    } catch (err) {
+      showStatus("error", "画面を開けませんでした", "LINEアプリ内からアクセスしてください。");
+    }
+  }
+
+  init();
+</script>
+
+</body>
+</html>
