@@ -70,6 +70,10 @@
     border-color: var(--line-green);
     box-shadow: 0 0 0 1px var(--line-green);
   }
+  .field select:disabled {
+    color: #b0b0b0;
+    background: #fafafa;
+  }
   .count-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -192,7 +196,7 @@
 
     <div class="field">
       <label>担当営業</label>
-      <select id="salesRep">
+      <select id="salesRep" disabled>
         <option value="">読み込み中…</option>
       </select>
     </div>
@@ -230,6 +234,8 @@
                              // ※GASへのリクエスト自体は自動リトライで最大2回
                              // 飛ぶことがあるが、それはこのフラグとは別に
                              // submitApply内部でのみ発生させる(下記参照)。
+  let salesRepsLoaded = false; // 担当営業リストの読み込み完了フラグ。
+                                // 完了前に送信された場合は「未選択」として扱う。
 
   const loadingScreen = document.getElementById("loadingScreen");
   const formScreen = document.getElementById("formScreen");
@@ -271,6 +277,9 @@
     selectedRepIndex = e.target.value;
   });
 
+  // 担当営業リストの取得は、フォーム表示をブロックしないよう独立して実行する。
+  // 呼び出し側(init)はこの完了を待たずにフォームを表示するため、
+  // ここでの所要時間がお客様の体感待ち時間に影響しないようにしている。
   async function loadSalesReps() {
     try {
       const res = await fetch(`${GAS_URL}?action=getSalesReps`);
@@ -282,6 +291,7 @@
       console.error("loadSalesReps error:", err);
       // 取得できない場合は空リストのまま(未選択で申し込み続行可)
     }
+
     salesRepSelect.innerHTML = "";
     const placeholder = document.createElement("option");
     placeholder.value = "";
@@ -293,6 +303,9 @@
       opt.textContent = rep.name;
       salesRepSelect.appendChild(opt);
     });
+
+    salesRepsLoaded = true;
+    salesRepSelect.disabled = false; // 読み込み完了後に選択可能にする
   }
 
   // GAS側の処理(シート書き込み・LINEプッシュ)自体は成功しているのに、
@@ -316,7 +329,10 @@
     submitBtn.disabled = true;
     submitBtn.textContent = isRetry ? "再送信中…" : "送信中…";
 
-    const rep = salesReps[selectedRepIndex] || { code: "", name: "" };
+    // 担当営業リストの読み込みが間に合っていない場合は「未選択」として送信する
+    // (フォーム表示を優先した結果、お客様が担当営業欄に触れる前に送信ボタンを
+    // 押せてしまう可能性があるため)。担当営業は必須項目ではないので実害はない。
+    const rep = (salesRepsLoaded ? salesReps[selectedRepIndex] : null) || { code: "", name: "" };
     const params = new URLSearchParams({
       action: "apply",
       userId: profile.userId,
@@ -390,10 +406,14 @@
       profile = await liff.getProfile();
       displayNameBox.textContent = profile.displayName;
 
-      await loadSalesReps();
-
+      // 【変更点】担当営業リストの取得(GASへの通信)を待たずに、
+      // ここですぐフォームを表示する。以前はawaitで待ってから表示していたため、
+      // GASのコールドスタート時などに数秒〜のロード待ちが発生していた。
       loadingScreen.style.display = "none";
       formScreen.style.display = "block";
+
+      // 担当営業リストの読み込みは裏側で並行して進め、完了次第プルダウンを更新する。
+      loadSalesReps();
     } catch (err) {
       console.error("init error:", err);
       showStatus("error", "画面を開けませんでした", "LINEアプリ内からアクセスしてください。");
