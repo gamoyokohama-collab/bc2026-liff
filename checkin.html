@@ -3,7 +3,7 @@
 <head>
 <base target="_top">
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
   :root { --line-green: #06C755; --red: #d9534f; --amber: #e0a326; }
@@ -18,7 +18,7 @@
     padding: 14px 16px;
     border-bottom: 1px solid #f0f0f0;
     background: #fff;
-    font-size: 17px;
+    font-size: 14px;
     font-weight: 600;
   }
   .container { padding: 24px 20px; }
@@ -28,24 +28,34 @@
     border-radius: 12px;
     border: none;
     color: #fff;
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 600;
     background: var(--line-green);
   }
   .scan-btn:disabled { opacity: 0.4; }
+  .init-error {
+    margin: 20px;
+    padding: 16px;
+    background: #fdecec;
+    border: 1px solid var(--red);
+    border-radius: 12px;
+    font-size: 13px;
+    color: #a33;
+    text-align: center;
+  }
   .result-card { margin-top: 20px; border-radius: 12px; padding: 20px; text-align: center; }
   .result-card.ok { background: #eafaf0; border: 1px solid var(--line-green); }
   .result-card.duplicate { background: #fef7e6; border: 1px solid var(--amber); }
   .result-card.error { background: #fdecec; border: 1px solid var(--red); }
-  .result-card .status-label { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+  .result-card .status-label { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
   .result-card .status-label.ok { color: var(--line-green); }
   .result-card .status-label.duplicate { color: var(--amber); }
   .result-card .status-label.error { color: var(--red); }
-  .result-card .salon { font-size: 20px; font-weight: 700; }
-  .result-card .detail { font-size: 15px; color: #7a7a7a; margin-top: 6px; }
+  .result-card .salon { font-size: 16px; font-weight: 700; }
+  .result-card .detail { font-size: 12px; color: #7a7a7a; margin-top: 4px; }
   .history { margin-top: 28px; }
-  .history-title { font-size: 13px; color: #9a9a9a; margin-bottom: 8px; }
-  .history-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+  .history-title { font-size: 11px; color: #9a9a9a; margin-bottom: 8px; }
+  .history-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px; }
   .history-item .name { color: #262626; }
   .history-item .time { color: #b0b0b0; }
 </style>
@@ -53,8 +63,8 @@
 <body>
 
 <div class="header">受付チェックイン</div>
-<div class="container">
-  <button class="scan-btn" id="scanBtn">QRコードをスキャン</button>
+<div class="container" id="mainContainer">
+  <button class="scan-btn" id="scanBtn" disabled>読み込み中…</button>
   <div id="result"></div>
   <div class="history" id="history" style="display:none;">
     <div class="history-title">直近のチェックイン</div>
@@ -63,12 +73,14 @@
 </div>
 
 <script>
-// GAS側のdoGetが埋め込む値(コード編集不要):
-// スクリプトプロパティ「LIFF_ID_CHECKIN」の値と、このApps ScriptのデプロイURL
-const LIFF_ID = "2010919674-WsksPFqO";
+// ↓↓↓ ここは実際の値をハードコーディングしている(GitHub Pagesはサーバーサイド
+// 処理ができずGASのテンプレート変数<?= ?>が使えないため)。
+// LIFF IDやGAS URLを変更した場合は、この2行を手動で更新すること。
+const LIFF_ID = "2010919674-WsksPFqO"; // 受付チェックイン用LIFF ID
 const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwwMJgIRQA-3dK7XImX3JiPbiGcv44hZTH1C0dhR1qfxXdHrFCM8zyLMXbOMMxT9UAlIA/exec";
 
 const checkinHistory = [];
+let isProcessing = false; // 連続スキャンによる多重送信を防ぐフラグ
 
 async function init() {
   try {
@@ -77,80 +89,86 @@ async function init() {
       liff.login();
       return;
     }
-    document.getElementById("scanBtn").addEventListener("click", startScan);
+    const scanBtn = document.getElementById("scanBtn");
+    scanBtn.disabled = false;
+    scanBtn.textContent = "QRコードをスキャン";
+    scanBtn.addEventListener("click", startScan);
   } catch (err) {
     console.error(err);
+    document.getElementById("mainContainer").innerHTML =
+      `<div class="init-error">読み込みに失敗しました。画面を再読み込みしてください。</div>`;
   }
 }
 
 async function startScan() {
+  if (isProcessing) return; // 連打・連続スキャン対策
+
   if (!liff.scanCodeV2) {
-    renderResult("error", "この端末ではQRスキャン機能が利用できません。");
+    renderResult("error", "この端末ではQRスキャン機能が利用できません。", "");
     return;
   }
   try {
     const result = await liff.scanCodeV2();
     if (!result || !result.value) return;
-    await submitCheckin(result.value.trim());
+    await submitCheckin(result.value.trim(), false);
   } catch (err) {
+    // カメラ権限拒否やスキャンキャンセルもここに来るため、
+    // エラー扱いにせず単に無視する(ボタンは押し直せる状態のまま)
     console.error(err);
   }
 }
 
-// GASへ1回リクエストを送る(通信エラー時はnullを返す。ステータス自体のエラーは返り値に含める)
-async function requestCheckin(ticketId) {
-  const params = new URLSearchParams({ action: "checkin", ticketId: ticketId });
-  const res = await fetch(GAS_WEBAPP_URL + "?" + params.toString());
-  return await res.json();
-}
-
-async function submitCheckin(ticketId) {
+// GAS Web Appはコールドスタート時に応答が遅れ、処理自体は成功しているのに
+// クライアント側でタイムアウト/エラー扱いになることがある(誤って「もう一度
+// スキャンしてください」と表示され、スタッフが二重スキャンしてしまう原因になっていた)。
+// そのため通信エラー時は1.5秒後に自動で1回だけ再試行する。
+async function submitCheckin(ticketId, isRetry) {
+  isProcessing = true;
   const scanBtn = document.getElementById("scanBtn");
   scanBtn.disabled = true;
-  scanBtn.textContent = "確認中…(コールドスタート時は数秒かかることがあります)";
+  scanBtn.textContent = isRetry ? "再確認中…" : "確認中…";
 
-  let data = null;
-  let lastErr = null;
+  try {
+    const params = new URLSearchParams({ action: "checkin", ticketId: ticketId });
+    const res = await fetch(GAS_WEBAPP_URL + "?" + params.toString(), {
+      method: "GET"
+    });
 
-  // GASのコールドスタート・ロック待ちで応答が遅れることがあるため、
-  // 通信エラー時は1回だけ自動リトライしてから最終判断する
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      data = await requestCheckin(ticketId);
-      lastErr = null;
-      break;
-    } catch (err) {
-      lastErr = err;
-      console.error(`checkin attempt ${attempt + 1} failed`, err);
-      if (attempt === 0) {
-        scanBtn.textContent = "再確認中…";
-        await new Promise((r) => setTimeout(r, 1500));
-      }
+    if (!res.ok) {
+      throw new Error("HTTP " + res.status);
+    }
+
+    const data = await res.json();
+
+    if (data.status === "ok") {
+      renderResult("ok", `${data.salonName} 様`, `来場 ${data.count}名 / チェックイン完了`);
+      checkinHistory.unshift({ salon: data.salonName, time: nowLabel() });
+      renderHistory();
+    } else if (data.status === "duplicate") {
+      renderResult("duplicate", `${data.salonName} 様`, "すでにチェックイン済みです");
+    } else if (data.status === "cancelled") {
+      renderResult("error", "キャンセル済みの申込です", "");
+    } else if (data.status === "not_found") {
+      renderResult("error", "該当するチケットが見つかりません", "QRコードをご確認ください");
+    } else {
+      renderResult("error", "処理に失敗しました", data.message || "もう一度お試しください");
+    }
+    finishProcessing();
+
+  } catch (err) {
+    console.error(err);
+    if (!isRetry) {
+      setTimeout(() => submitCheckin(ticketId, true), 1500);
+    } else {
+      renderResult("error", "通信エラーが発生しました", "電波の良い場所でもう一度お試しください");
+      finishProcessing();
     }
   }
+}
 
-  if (lastErr) {
-    renderResult("error", "通信エラーが発生しました",
-      "処理自体は完了している場合があります。受付名簿(スプレッドシート)をご確認いただくか、少し時間を置いて同じQRを再度スキャンしてください。");
-    scanBtn.disabled = false;
-    scanBtn.textContent = "QRコードをスキャン";
-    return;
-  }
-
-  if (data.status === "ok") {
-    renderResult("ok", `${data.salonName} 様`, `来場 ${data.count}名 / チェックイン完了`);
-    checkinHistory.unshift({ salon: data.salonName, time: nowLabel() });
-    renderHistory();
-  } else if (data.status === "duplicate") {
-    renderResult("duplicate", `${data.salonName} 様`, "すでにチェックイン済みです");
-  } else if (data.status === "cancelled") {
-    renderResult("error", "キャンセル済みの申込です", "");
-  } else if (data.status === "not_found") {
-    renderResult("error", "該当するチケットが見つかりません", "QRコードをご確認ください");
-  } else {
-    renderResult("error", "処理に失敗しました", "もう一度お試しください");
-  }
-
+function finishProcessing() {
+  isProcessing = false;
+  const scanBtn = document.getElementById("scanBtn");
   scanBtn.disabled = false;
   scanBtn.textContent = "QRコードをスキャン";
 }
@@ -185,7 +203,7 @@ function nowLabel() {
 
 function escapeHtml(str) {
   const div = document.createElement("div");
-  div.textContent = str;
+  div.textContent = str == null ? "" : str;
   return div.innerHTML;
 }
 
