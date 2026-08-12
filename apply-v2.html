@@ -223,6 +223,9 @@
   let salesReps = [];
   let selectedCount = null;
   let selectedRepIndex = "";
+  let isSubmitting = false; // 二重送信防止フラグ。ボタンのdisabled属性だけに
+                             // 頼らず、連打・多重イベント発火でも確実に1回しか
+                             // 送信されないようにするためのガード。
 
   const loadingScreen = document.getElementById("loadingScreen");
   const formScreen = document.getElementById("formScreen");
@@ -271,6 +274,7 @@
         salesReps = data.reps;
       }
     } catch (err) {
+      console.error("loadSalesReps error:", err);
       // 取得できない場合は空リストのまま(未選択で申し込み続行可)
     }
     salesRepSelect.innerHTML = "";
@@ -287,6 +291,11 @@
   }
 
   async function submitApply() {
+    // 二重送信ガード:連打や多重イベント発火があっても、
+    // 実行中(isSubmitting=true)の間は何もせず即座に抜ける。
+    if (isSubmitting) return;
+    isSubmitting = true;
+
     submitBtn.disabled = true;
     submitBtn.textContent = "送信中…";
 
@@ -303,7 +312,20 @@
 
     try {
       const res = await fetch(`${GAS_URL}?${params.toString()}`);
-      const data = await res.json();
+
+      if (!res.ok) {
+        // GASがHTTPレベルでエラーを返した場合(サーバーエラー等)
+        throw new Error("HTTP " + res.status);
+      }
+
+      let data;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        // JSONとして読めなかった = GAS側が想定外のページ(エラー画面等)を
+        // 返した可能性が高い。原因を「通信エラー」と混同しないよう分けて記録。
+        throw new Error("invalid response: " + parseErr.message);
+      }
 
       if (data.status === "ok") {
         showStatus("ok", "お申し込みありがとうございます",
@@ -316,8 +338,13 @@
         showStatus("error", "送信できませんでした", data.message || "時間を置いて再度お試しください。");
       }
     } catch (err) {
-      showStatus("error", "通信エラーが発生しました", "電波の良い場所で再度お試しください。");
+      console.error("submitApply error:", err); // スマホのUIには出ないが、
+                                                   // PCの開発者ツールで原因調査する際の手がかりになる
+      showStatus("error", "送信できませんでした",
+        "時間をおいて再度お試しください。問題が続く場合はスタッフまでお知らせください。");
     }
+    // 成功・失敗いずれの場合も、この画面遷移で操作は完結するため
+    // isSubmittingは意図的にfalseへ戻さない(戻すと再連打が可能になってしまうため)。
   }
 
   submitBtn.addEventListener("click", submitApply);
@@ -339,6 +366,7 @@
       loadingScreen.style.display = "none";
       formScreen.style.display = "block";
     } catch (err) {
+      console.error("init error:", err);
       showStatus("error", "画面を開けませんでした", "LINEアプリ内からアクセスしてください。");
     }
   }
