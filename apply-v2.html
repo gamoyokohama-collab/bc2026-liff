@@ -4,7 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>神奈川ビューティコレクション2026 来場お申し込み</title>
-<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+<!-- LINEドメインへの接続(DNS解決・TLSハンドシェイク)を先に済ませておくことで、
+     実際にSDKやAPIへ通信する際の待ち時間を短縮する -->
+<link rel="preconnect" href="https://static.line-scdn.net">
+<link rel="preconnect" href="https://access.line.me">
+<link rel="preconnect" href="https://api.line.me">
+
+<!-- defer: HTML本体の解析・描画をブロックせずにSDKを読み込む。
+     これが無いと、SDKのダウンロードが終わるまで画面に何も表示されない。 -->
+<script defer charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
 <style>
   :root {
     --line-green: #06C755;
@@ -70,7 +80,7 @@
     border-color: var(--line-green);
     box-shadow: 0 0 0 1px var(--line-green);
   }
-  .field select:disabled {
+  .field input[type="text"]:disabled, .field select:disabled {
     color: #b0b0b0;
     background: #fafafa;
   }
@@ -174,7 +184,7 @@
 
 <div id="loadingScreen" class="loading-screen">
   <div class="spinner"></div>
-  <div class="loading-text">LINEのプロフィール情報を確認しています…</div>
+  <div class="loading-text">読み込んでいます…</div>
 </div>
 
 <div id="formScreen">
@@ -186,7 +196,7 @@
   <div class="content">
     <div class="field">
       <label>お名前(LINEより取得)</label>
-      <div class="readonly" id="displayNameBox">—</div>
+      <div class="readonly" id="displayNameBox">取得中…</div>
     </div>
 
     <div class="field">
@@ -225,7 +235,11 @@
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwwMJgIRQA-3dK7XImX3JiPbiGcv44hZTH1C0dhR1qfxXdHrFCM8zyLMXbOMMxT9UAlIA/exec";
 
   let profile = null;
+  let profileLoaded = false; // getProfile()の完了フラグ。完了前に送信された場合の
+                              // フォールバック判定に使う。
   let salesReps = [];
+  let salesRepsLoaded = false; // 担当営業リストの読み込み完了フラグ。
+                                // 完了前に送信された場合は「未選択」として扱う。
   let selectedCount = null;
   let selectedRepIndex = "";
   let isSubmitting = false; // 二重送信防止フラグ。ボタンのdisabled属性だけに
@@ -234,8 +248,6 @@
                              // ※GASへのリクエスト自体は自動リトライで最大2回
                              // 飛ぶことがあるが、それはこのフラグとは別に
                              // submitApply内部でのみ発生させる(下記参照)。
-  let salesRepsLoaded = false; // 担当営業リストの読み込み完了フラグ。
-                                // 完了前に送信された場合は「未選択」として扱う。
 
   const loadingScreen = document.getElementById("loadingScreen");
   const formScreen = document.getElementById("formScreen");
@@ -259,7 +271,9 @@
   }
 
   function updateSubmitState() {
-    submitBtn.disabled = !(salonNameInput.value.trim() && selectedCount);
+    // プロフィール(userId)取得が済んでいない間は、送信してもGAS側で
+    // 必須パラメータ不足エラーになるだけなので、ボタンを押させない。
+    submitBtn.disabled = !(profileLoaded && salonNameInput.value.trim() && selectedCount);
   }
 
   countGrid.addEventListener("click", (e) => {
@@ -278,8 +292,6 @@
   });
 
   // 担当営業リストの取得は、フォーム表示をブロックしないよう独立して実行する。
-  // 呼び出し側(init)はこの完了を待たずにフォームを表示するため、
-  // ここでの所要時間がお客様の体感待ち時間に影響しないようにしている。
   async function loadSalesReps() {
     try {
       const res = await fetch(`${GAS_URL}?action=getSalesReps`);
@@ -305,7 +317,22 @@
     });
 
     salesRepsLoaded = true;
-    salesRepSelect.disabled = false; // 読み込み完了後に選択可能にする
+    salesRepSelect.disabled = false;
+  }
+
+  // LINEプロフィール(表示名・userId)の取得も、フォーム表示をブロックしない。
+  // 完了次第、名前欄の表示を更新し、送信ボタンを押せる状態にする。
+  async function loadProfile() {
+    try {
+      profile = await liff.getProfile();
+      displayNameBox.textContent = profile.displayName;
+      profileLoaded = true;
+      updateSubmitState();
+    } catch (err) {
+      console.error("loadProfile error:", err);
+      displayNameBox.textContent = "取得できませんでした";
+      showStatus("error", "情報を取得できませんでした", "画面を再読み込みしてください。");
+    }
   }
 
   // GAS側の処理(シート書き込み・LINEプッシュ)自体は成功しているのに、
@@ -329,9 +356,6 @@
     submitBtn.disabled = true;
     submitBtn.textContent = isRetry ? "再送信中…" : "送信中…";
 
-    // 担当営業リストの読み込みが間に合っていない場合は「未選択」として送信する
-    // (フォーム表示を優先した結果、お客様が担当営業欄に触れる前に送信ボタンを
-    // 押せてしまう可能性があるため)。担当営業は必須項目ではないので実害はない。
     const rep = (salesRepsLoaded ? salesReps[selectedRepIndex] : null) || { code: "", name: "" };
     const params = new URLSearchParams({
       action: "apply",
@@ -394,6 +418,9 @@
 
   submitBtn.addEventListener("click", () => submitApply(false));
 
+  // defer付きscriptタグでSDKを読み込んでいるため、liffオブジェクトが
+  // 使えるようになるタイミングはDOMContentLoaded以降になる。
+  // そのためinit本体はDOMContentLoadedのハンドラ内から呼び出す。
   async function init() {
     try {
       await liff.init({ liffId: LIFF_ID });
@@ -403,16 +430,14 @@
         return;
       }
 
-      profile = await liff.getProfile();
-      displayNameBox.textContent = profile.displayName;
-
-      // 【変更点】担当営業リストの取得(GASへの通信)を待たずに、
-      // ここですぐフォームを表示する。以前はawaitで待ってから表示していたため、
-      // GASのコールドスタート時などに数秒〜のロード待ちが発生していた。
+      // 【変更点】liff.getProfile()の完了を待たずに、ここでフォームを表示する。
+      // 名前欄は「取得中…」のまま表示し、loadProfile()が裏側で完了次第更新する。
       loadingScreen.style.display = "none";
       formScreen.style.display = "block";
 
-      // 担当営業リストの読み込みは裏側で並行して進め、完了次第プルダウンを更新する。
+      // プロフィール取得・担当営業リスト取得は並行して裏側で進める。
+      // どちらもフォーム表示をブロックしない。
+      loadProfile();
       loadSalesReps();
     } catch (err) {
       console.error("init error:", err);
@@ -420,7 +445,11 @@
     }
   }
 
-  init();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 </script>
 
 </body>
