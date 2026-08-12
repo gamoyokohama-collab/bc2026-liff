@@ -134,6 +134,7 @@
   }
   .status-icon.ok { background: var(--line-green); }
   .status-icon.error { background: #e0505a; }
+  .status-icon.warn { background: #e0a326; }
   .status-title {
     font-size: 15px;
     font-weight: 700;
@@ -226,6 +227,9 @@
   let isSubmitting = false; // 二重送信防止フラグ。ボタンのdisabled属性だけに
                              // 頼らず、連打・多重イベント発火でも確実に1回しか
                              // 送信されないようにするためのガード。
+                             // ※GASへのリクエスト自体は自動リトライで最大2回
+                             // 飛ぶことがあるが、それはこのフラグとは別に
+                             // submitApply内部でのみ発生させる(下記参照)。
 
   const loadingScreen = document.getElementById("loadingScreen");
   const formScreen = document.getElementById("formScreen");
@@ -240,8 +244,9 @@
     loadingScreen.style.display = "none";
     formScreen.style.display = "none";
     statusScreen.className = "status-screen show";
+    const iconMap = { ok: "✓", warn: "!", error: "!" };
     statusScreen.innerHTML = `
-      <div class="status-icon ${type}">${type === "ok" ? "✓" : "!"}</div>
+      <div class="status-icon ${type}">${iconMap[type] || "!"}</div>
       <div class="status-title">${title}</div>
       <div class="status-message">${message}</div>
     `;
@@ -290,14 +295,26 @@
     });
   }
 
-  async function submitApply() {
-    // 二重送信ガード:連打や多重イベント発火があっても、
-    // 実行中(isSubmitting=true)の間は何もせず即座に抜ける。
-    if (isSubmitting) return;
-    isSubmitting = true;
+  // GAS側の処理(シート書き込み・LINEプッシュ)自体は成功しているのに、
+  // LIFFのバックグラウンド化や電波状況によって、その「成功しました」という
+  // レスポンスだけがスマホに届かないケースがある(実際にシートには書き込まれ、
+  // QRチケットもLINEに届いているのに、画面には失敗表示が出る現象)。
+  // そのため:
+  //  1. 通信が失敗したら1.5秒後に1回だけ自動で再試行する
+  //     (再試行時、GAS側はfindActiveRowByUserIdの重複チェックにより
+  //      安全に「duplicate」を返すだけなので、二重登録は発生しない)
+  //  2. 再試行も失敗した場合は「失敗しました」と断定せず、
+  //     「結果を確認できなかった」ことを伝え、お客様の不安を軽減する
+  async function submitApply(isRetry) {
+    // 二重送信ガード:初回呼び出し以外(連打等)は即座に抜ける。
+    // isRetryによる内部的な再試行はこのガードの対象外として扱う。
+    if (!isRetry) {
+      if (isSubmitting) return;
+      isSubmitting = true;
+    }
 
     submitBtn.disabled = true;
-    submitBtn.textContent = "送信中…";
+    submitBtn.textContent = isRetry ? "再送信中…" : "送信中…";
 
     const rep = salesReps[selectedRepIndex] || { code: "", name: "" };
     const params = new URLSearchParams({
@@ -331,23 +348,35 @@
         showStatus("ok", "お申し込みありがとうございます",
           "LINEのトーク画面にQRチケットをお送りしました。当日は受付でご提示ください。");
       } else if (data.status === "duplicate") {
-        showStatus("error", "すでにお申し込み済みです", data.message || "");
+        showStatus("ok", "お申し込みは完了しています",
+          "すでにお申し込みを受け付けています。LINEのトーク画面に届いたQRチケットをご確認ください。");
       } else if (data.status === "full") {
         showStatus("error", "満員のため受付を終了しました", data.message || "");
       } else {
         showStatus("error", "送信できませんでした", data.message || "時間を置いて再度お試しください。");
       }
     } catch (err) {
-      console.error("submitApply error:", err); // スマホのUIには出ないが、
-                                                   // PCの開発者ツールで原因調査する際の手がかりになる
-      showStatus("error", "送信できませんでした",
-        "時間をおいて再度お試しください。問題が続く場合はスタッフまでお知らせください。");
+      console.error("submitApply error:", err, "isRetry:", isRetry);
+
+      if (!isRetry) {
+        // 1回だけ自動で再試行する。ここでのリトライはisSubmittingガードの
+        // 対象外として扱うため、フラグは変更せずそのままsubmitApply(true)を呼ぶ。
+        setTimeout(() => submitApply(true), 1500);
+      } else {
+        // 再試行も失敗した場合。GAS側の処理自体は成功している可能性が高いため、
+        // 「失敗しました」と断定せず、結果を確認できなかった旨を伝える。
+        showStatus("warn", "送信結果を確認できませんでした",
+          "通信状況により、送信できたかどうかを確認できませんでした。" +
+          "LINEのトーク画面にQRチケットが届いていれば、お申し込みは完了しています。" +
+          "届いていない場合は、少し時間をおいてから同じ内容でもう一度お試しいただくか、" +
+          "スタッフまでお声がけください。");
+      }
     }
-    // 成功・失敗いずれの場合も、この画面遷移で操作は完結するため
+    // 成功・最終的な失敗いずれの場合も、この画面遷移で操作は完結するため
     // isSubmittingは意図的にfalseへ戻さない(戻すと再連打が可能になってしまうため)。
   }
 
-  submitBtn.addEventListener("click", submitApply);
+  submitBtn.addEventListener("click", () => submitApply(false));
 
   async function init() {
     try {
