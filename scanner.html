@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>BC2026 受付スキャナー</title>
+<!-- カメラ映像からQRを連続で読み取るライブラリ -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --ok: #06C755;
+    --pass: #0A84C6;
+    --ng: #D93A44;
+    --ink: #1c1c1c;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+    background: var(--ink);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px; font-size: 13px;
+  }
+  .bar .title { font-weight: 700; }
+  .bar .tally { font-variant-numeric: tabular-nums; opacity: 0.85; }
+
+  .camera-area { flex: 1; position: relative; overflow: hidden; }
+  #reader { width: 100%; height: 100%; }
+  #reader video { width: 100% !important; height: 100% !important; object-fit: cover; }
+
+  .hint {
+    position: absolute; left: 0; right: 0; bottom: 16px; text-align: center;
+    font-size: 14px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+    pointer-events: none;
+  }
+
+  /* 開始前の画面 */
+  .start {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center;
+  }
+  .start p { font-size: 13px; opacity: 0.8; line-height: 1.7; margin: 0; }
+  .start-btn {
+    padding: 16px 40px; border-radius: 14px; border: none; background: var(--ok);
+    color: #fff; font-size: 17px; font-weight: 700; cursor: pointer;
+  }
+  .start-btn:focus-visible, .manual button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
+  /* 読み取り結果(画面全体を色で塗る) */
+  .result {
+    position: absolute; inset: 0; display: none; flex-direction: column;
+    align-items: center; justify-content: center; padding: 24px; text-align: center;
+  }
+  .result.show { display: flex; }
+  .result.ok   { background: var(--ok); }
+  .result.pass { background: var(--pass); }
+  .result.ng   { background: var(--ng); }
+  .result.wait { background: rgba(0,0,0,0.75); }
+  .result .mark { font-size: 72px; font-weight: 800; line-height: 1; margin-bottom: 12px; }
+  .result .head { font-size: 26px; font-weight: 800; margin-bottom: 14px; }
+  .result .salon { font-size: 20px; font-weight: 700; word-break: break-all; }
+  .result .count { font-size: 17px; margin-top: 4px; }
+  .result .note { font-size: 14px; margin-top: 14px; opacity: 0.95; line-height: 1.6; }
+
+  /* 手入力(QRが読めないとき・ハンディスキャナー用) */
+  .manual { display: flex; gap: 8px; padding: 10px 16px 14px; }
+  .manual input {
+    flex: 1; min-width: 0; padding: 12px; border-radius: 10px; border: 1px solid #555;
+    background: #2a2a2a; color: #fff; font-size: 15px;
+  }
+  .manual button {
+    padding: 0 18px; border-radius: 10px; border: none; background: #444; color: #fff;
+    font-size: 14px; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="title">BC2026 受付スキャナー</div>
+  <div class="tally">この端末で <span id="tally">0</span> 件</div>
+</div>
+
+<div class="camera-area">
+  <div id="reader"></div>
+  <div class="hint" id="hint" hidden>QRコードをカメラにかざしてください</div>
+
+  <div class="start" id="start">
+    <button class="start-btn" id="startBtn" type="button">スキャンを開始</button>
+    <p>カメラの使用を求められたら「許可」を選んでください。<br>一度開始すれば、続けて何人でも読み取れます。</p>
+  </div>
+
+  <div class="result" id="result" aria-live="assertive"></div>
+</div>
+
+<div class="manual">
+  <input id="manualInput" type="text" inputmode="text" autocomplete="off"
+         placeholder="チケットIDを入力(例 KBC26-000123)">
+  <button id="manualBtn" type="button">照合</button>
+</div>
+
+<script>
+  // ===== 設定 =====
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbwwMJgIRQA-3dK7XImX3JiPbiGcv44hZTH1C0dhR1qfxXdHrFCM8zyLMXbOMMxT9UAlIA/exec";
+  const RESULT_MS = 1800;   // 結果を表示しておく時間
+  const SAME_CODE_MS = 6000; // 同じQRを続けて読んだときに無視する時間
+
+  let scanner = null;
+  let busy = false;          // 1件処理中は次を読まない
+  let lastCode = "";
+  let lastCodeAt = 0;
+  let tally = 0;
+  let audioCtx = null;
+
+  const resultEl = document.getElementById("result");
+  const hintEl = document.getElementById("hint");
+
+  // ----- 音(スタッフが画面を見ていなくても結果が分かるように) -----
+  function beep(kind) {
+    if (!audioCtx) return;
+    const tones = kind === "ng" ? [300, 220] : kind === "pass" ? [880, 880] : [1320];
+    let t = audioCtx.currentTime;
+    tones.forEach((f) => {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.frequency.value = f;
+      o.type = "sine";
+      g.gain.setValueAtTime(0.25, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(t);
+      o.stop(t + 0.16);
+      t += 0.18;
+    });
+  }
+
+  function esc(s) {
+    const d = document.createElement("div");
+    d.textContent = s == null ? "" : String(s);
+    return d.innerHTML;
+  }
+
+  function showResult(kind, mark, head, salon, count, note) {
+    resultEl.className = "result show " + kind;
+    resultEl.innerHTML = `
+      <div class="mark">${mark}</div>
+      <div class="head">${esc(head)}</div>
+      ${salon ? `<div class="salon">${esc(salon)} 様</div>` : ""}
+      ${count ? `<div class="count">${esc(count)}名</div>` : ""}
+      ${note ? `<div class="note">${esc(note)}</div>` : ""}
+    `;
+  }
+
+  function hideResult() {
+    resultEl.className = "result";
+    resultEl.innerHTML = "";
+  }
+
+  // ----- GASへ照会(失敗したら1回だけ再試行) -----
+  async function callCheckin(ticketId) {
+    const url = `${GAS_URL}?action=checkin&ticketId=${encodeURIComponent(ticketId)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  }
+
+  async function processCode(raw) {
+    const ticketId = String(raw || "").trim();
+    if (!ticketId || busy) return;
+
+    // 同じQRをかざし続けている場合は無視
+    const now = Date.now();
+    if (ticketId === lastCode && now - lastCodeAt < SAME_CODE_MS) return;
+    lastCode = ticketId;
+    lastCodeAt = now;
+
+    busy = true;
+    showResult("wait", "…", "確認中", "", "", "");
+
+    let data = null;
+    let retried = false;
+    try {
+      data = await callCheckin(ticketId);
+    } catch (e1) {
+      retried = true;
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        data = await callCheckin(ticketId);
+      } catch (e2) {
+        data = null;
+      }
+    }
+
+    if (!data) {
+      showResult("ng", "!", "通信できませんでした", "", "",
+        "もう一度QRをかざしてください。続く場合は手入力で照合してください。");
+      beep("ng");
+      lastCode = ""; // すぐ読み直せるようにする
+    } else if (data.status === "ok") {
+      tally++;
+      document.getElementById("tally").textContent = tally;
+      showResult("ok", "✓", "チェックイン完了", data.salonName, data.count, "");
+      beep("ok");
+    } else if (data.status === "duplicate") {
+      // 当日受付QRで受付済みの人・2回目の読み取りなど。入場は問題ない。
+      // 1回目の通信が失敗して再試行した場合は、1回目で処理済みの可能性が高い。
+      if (retried) {
+        tally++;
+        document.getElementById("tally").textContent = tally;
+        showResult("ok", "✓", "チェックイン完了", data.salonName, "", "");
+        beep("ok");
+      } else {
+        showResult("pass", "✓", "受付済みです", data.salonName, "", "そのままお通しください");
+        beep("pass");
+      }
+    } else if (data.status === "not_found") {
+      showResult("ng", "×", "チケットが見つかりません", "", "",
+        "当日受付QRから受付していただくか、受付担当の責任者に確認してください。");
+      beep("ng");
+    } else if (data.status === "cancelled") {
+      showResult("ng", "×", "キャンセル済みのチケットです", "", "",
+        "当日受付QRから改めて受付していただいてください。");
+      beep("ng");
+    } else {
+      showResult("ng", "!", "照合できませんでした", "", "", data.message || "もう一度お試しください。");
+      beep("ng");
+      lastCode = "";
+    }
+
+    setTimeout(() => {
+      hideResult();
+      busy = false;
+    }, RESULT_MS);
+  }
+
+  // ----- カメラ起動 -----
+  async function startScanner() {
+    // 音を鳴らすには、ボタン操作のタイミングで準備しておく必要がある
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      audioCtx = null;
+    }
+
+    document.getElementById("start").hidden = true;
+    scanner = new Html5Qrcode("reader", { verbose: false });
+    try {
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } },
+        (decodedText) => processCode(decodedText),
+        () => {} // 読み取れないフレームは無視
+      );
+      hintEl.hidden = false;
+    } catch (err) {
+      console.error(err);
+      document.getElementById("start").hidden = false;
+      showResult("ng", "!", "カメラを起動できませんでした", "", "",
+        "ブラウザのカメラ使用を許可してから、もう一度「スキャンを開始」を押してください。");
+      setTimeout(hideResult, 4000);
+    }
+  }
+
+  document.getElementById("startBtn").addEventListener("click", startScanner);
+
+  // ----- 手入力・ハンディスキャナー(Enterで送信) -----
+  const manualInput = document.getElementById("manualInput");
+  function submitManual() {
+    const v = manualInput.value.trim().toUpperCase();
+    if (!v) return;
+    manualInput.value = "";
+    lastCode = ""; // 手入力は同一コード制限をかけない
+    processCode(v);
+  }
+  document.getElementById("manualBtn").addEventListener("click", submitManual);
+  manualInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitManual();
+  });
+</script>
+</body>
+</html>
